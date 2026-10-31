@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Repo Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #1e293b; margin-top: 1.5rem; margin-bottom: 0.75rem; font-weight: 600; font-size: 1.1em; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.25rem; }
+        .markdown-body p { margin-bottom: 1rem; color: #475569; line-height: 1.6; font-size: 0.95em; }
+        .markdown-body ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1rem; color: #475569; }
+        .markdown-body code { background-color: #f1f5f9; border: 1px solid #e2e8f0; padding: 0.1rem 0.3rem; border-radius: 0.375rem; color: #334155; font-family: monospace; font-size: 0.85em; }
+        .tab-active { border-bottom: 2px solid #3b82f6; color: #1d4ed8; }
+        @keyframes shimmer { 100% { transform: translateX(100%); } }
+        .shimmer-line { position: relative; overflow: hidden; background-color: #f1f5f9; border-radius: 9999px; height: 12px; }
+        .shimmer-line::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; transform: translateX(-100%); background-image: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent); animation: shimmer 1.5s infinite; }
+        
+        .session-btn.active { background-color: #f3f4f6; font-weight: 500; color: #111827; }
+    </style>
+</head>
+<body class="bg-white text-gray-800 h-screen flex font-sans overflow-hidden">
+
+    <aside class="w-64 bg-[#f9fafb] border-r border-gray-200 flex flex-col hidden md:flex shrink-0">
+        <div class="p-5 flex items-center gap-2">
+            <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+            <h1 class="text-base font-semibold text-gray-900 tracking-tight">Repo Visualizer</h1>
+        </div>
+        
+        <div class="px-4 pb-4">
+            <button onclick="startNewSession()" class="w-full bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm py-2 px-3 rounded-lg transition-colors flex items-center gap-2 shadow-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                New analysis
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-4">
+            <p class="text-[10px] font-semibold text-gray-500 mb-3 uppercase tracking-widest">Recent Chats</p>
+            <div id="sidebar-sessions" class="space-y-1"></div>
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full relative bg-white min-w-0">
+        <header class="h-14 border-b border-gray-200 flex items-center justify-between px-6 bg-white shrink-0">
+            <div id="top-repo-name" class="text-sm font-medium text-gray-400 italic truncate max-w-md">No repository selected</div>
+            <button class="text-sm border border-gray-300 text-gray-700 px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors shadow-sm">Export report</button>
+        </header>
+
+        <div id="chat-container" class="flex-1 overflow-y-auto p-6 pb-40 scroll-smooth"></div>
+
+        <div class="absolute bottom-6 left-0 right-0 px-6 pointer-events-none">
+            <div class="max-w-3xl mx-auto pointer-events-auto relative">
+                <form id="chat-form" class="relative flex items-center bg-white border border-gray-200 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)] rounded-full p-1.5">
+                    <input type="text" id="chat-input" placeholder="Paste a public GitHub repo link, or ask a follow-up question..." class="w-full bg-transparent text-gray-800 rounded-full pl-4 pr-14 py-3 focus:outline-none text-sm placeholder-gray-400" required>
+                    <button type="submit" id="submit-btn" class="absolute right-2.5 bg-[#4f6bfb] hover:bg-blue-600 text-white w-9 h-9 rounded-full flex items-center justify-center transition-colors disabled:opacity-50">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+                    </button>
+                </form>
+                <div id="error-box" class="hidden mt-2 text-red-500 text-xs font-medium text-center"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function generateUUID() { return Math.random().toString(36).substring(2, 15); }
+        
+        const initialHTML = `
+            <div class="max-w-3xl mx-auto flex gap-4 mb-6">
+                <div class="w-7 h-7 rounded bg-[#4f6bfb] flex-shrink-0 flex items-center justify-center text-white"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M4 15h16a1 1 0 001-1V10a1 1 0 00-1-1H4a1 1 0 00-1 1v4a1 1 0 001 1z"></path></svg></div>
+                <div class="flex-1">
+                    <p class="text-gray-900 font-medium mb-1 text-sm">System Ready</p>
+                    <div class="text-gray-700 bg-white border border-gray-200 p-4 rounded-xl shadow-sm inline-block text-sm">
+                        Hello! Paste a GitHub repository URL below. I will fetch the files step-by-step and generate a visual architecture breakdown.
+                    </div>
+                </div>
+            </div>`;
+
+        let sessions = {};
+        let activeSessionId = generateUUID();
+        sessions[activeSessionId] = { name: "New Analysis", html: initialHTML, hasContext: false, repoName: "No repository selected" };
+
+        const form = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const errorBox = document.getElementById('error-box');
+        const chatContainer = document.getElementById('chat-container');
+        const topRepoName = document.getElementById('top-repo-name');
+        const sidebarSessions = document.getElementById('sidebar-sessions');
+
+        const aiAvatar = `<div class="w-7 h-7 rounded bg-[#4f6bfb] flex-shrink-0 flex items-center justify-center text-white"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M4 15h16a1 1 0 001-1V10a1 1 0 00-1-1H4a1 1 0 00-1 1v4a1 1 0 001 1z"></path></svg></div>`;
+        const iconCheck = `<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+        const iconSpin = `<svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+        const iconCircle = `<div class="w-3.5 h-3.5 border-2 border-gray-300 rounded-full ml-0.5"></div>`;
+
+        renderActiveSession();
+        renderSidebar();
+
+        function startNewSession() {
+            sessions[activeSessionId].html = chatContainer.innerHTML;
+            activeSessionId = generateUUID();
+            sessions[activeSessionId] = { name: "New Analysis", html: initialHTML, hasContext: false, repoName: "No repository selected" };
+            renderActiveSession();
+            renderSidebar();
+            chatInput.focus();
+        }
+
+        window.switchToSession = function(id) {
+            if(id === activeSessionId) return;
+            sessions[activeSessionId].html = chatContainer.innerHTML;
+            activeSessionId = id;
+            renderActiveSession();
+            renderSidebar();
+        }
+
+        function renderActiveSession() {
+            const sess = sessions[activeSessionId];
+            chatContainer.innerHTML = sess.html;
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            topRepoName.innerText = sess.repoName;
+            if(sess.hasContext) {
+                topRepoName.classList.remove('text-gray-400', 'italic');
+                topRepoName.classList.add('text-gray-800');
+            } else {
+                topRepoName.classList.add('text-gray-400', 'italic');
+                topRepoName.classList.remove('text-gray-800');
+            }
+        }
+
+        function renderSidebar() {
+            sidebarSessions.innerHTML = '';
+            Object.keys(sessions).reverse().forEach(id => {
+                const sess = sessions[id];
+                const isActive = id === activeSessionId ? 'active bg-gray-100 font-medium text-gray-900' : 'text-gray-600 hover:bg-gray-50';
+                sidebarSessions.insertAdjacentHTML('beforeend', `
+                    <button onclick="switchToSession('${id}')" class="w-full text-left px-3 py-2 text-[13px] rounded-md truncate transition-colors ${isActive}">
+                        ${sess.name}
+                    </button>
+                `);
+            });
+        }
+
+        function updateSessionName(name) {
+            sessions[activeSessionId].name = name;
+            sessions[activeSessionId].repoName = name;
+            sessions[activeSessionId].hasContext = true;
+            renderActiveSession();
+            renderSidebar();
+        }
+
+        window.switchTab = function(btn, showDiagram) {
+            const container = btn.closest('.bg-white');
+            const diagram = container.querySelector('.content-diagram');
+            const text = container.querySelector('.content-text');
+            const btns = container.querySelectorAll('.tab-btn');
+            btns.forEach(b => { b.classList.remove('tab-active'); b.classList.add('text-gray-500'); });
+            btn.classList.add('tab-active'); btn.classList.remove('text-gray-500');
+            if (showDiagram) { diagram.classList.remove('hidden'); text.classList.add('hidden'); } 
+            else { text.classList.remove('hidden'); diagram.classList.add('hidden'); }
+            sessions[activeSessionId].html = chatContainer.innerHTML;
+        };
+
+        function appendUserMessage(text) {
+            const msgHtml = `<div class="max-w-3xl mx-auto flex gap-4 mb-6 flex-row-reverse"><div class="flex-1 flex justify-end"><div class="text-gray-800 bg-gray-100 px-4 py-2.5 rounded-2xl max-w-[80%] text-sm">${text}</div></div></div>`;
+            chatContainer.insertAdjacentHTML('beforeend', msgHtml);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            sessions[activeSessionId].html = chatContainer.innerHTML;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userInput = chatInput.value.trim();
+            if (!userInput) return;
+            appendUserMessage(userInput);
+            chatInput.value = '';
+            errorBox.classList.add('hidden');
+            submitBtn.disabled = true;
+
+            const currentSession = sessions[activeSessionId];
+            const fetchSessionId = activeSessionId; // Lock the session ID for this fetch stream
+
+            try {
+                if (userInput.includes('github.com') && !currentSession.hasContext) {
+                    
+                    try {
+                        const urlParts = new URL(userInput).pathname.split('/').filter(Boolean);
+                        if(urlParts.length >= 2) {
+                            updateSessionName(urlParts[1]);
+                        }
+                    } catch(e){}
+
+                    const loaderId = 'loader-' + Date.now();
+                    const loaderHtml = `
+                    <div id="${loaderId}" class="max-w-3xl mx-auto flex gap-4 mb-6">
+                        ${aiAvatar}
+                        <div class="flex-1 w-full min-w-0">
+                            <p id="${loaderId}-status-title" class="text-sm text-gray-800 mb-3 mt-1">
+                                Repository fetched. I am reading the files one by one...
+                            </p>
+                            <div class="bg-gray-50/50 rounded-xl border border-gray-200 p-5 overflow-hidden">
+                                <ul id="${loaderId}-file-list" class="space-y-3.5 font-mono text-[13px] text-gray-700 break-words w-full"></ul>
+                            </div>
+                        </div>
+                    </div>`;
+                    
+                    chatContainer.insertAdjacentHTML('beforeend', loaderHtml);
+                    
+                    const response = await fetch('http://127.0.0.1:8000/api/analyze', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: userInput, session_id: fetchSessionId })
+                    });
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder("utf-8");
+                    let aiTextBuffer = "";
+                    let isStreamingText = false;
+                    let resultContainerCreated = false;
+                    let resultContainerId = 'result-' + Date.now();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        // Safe check for scrolling
+                        const isNearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight <= 150;
+                        const chunk = decoder.decode(value, { stream: true });
+                        const lines = chunk.split('\n').filter(Boolean);
+                        
+                        for (let line of lines) {
+                            const data = JSON.parse(line);
+                            if (data.type === "error") throw new Error(data.message);
+                            
+                            // 🛡️ BULLETPROOF DOM CHECKS APPLIED EVERYWHERE BELOW
+                            
+                            if (data.type === "status") {
+                                const statusTitle = document.getElementById(`${loaderId}-status-title`);
+                                if (statusTitle) statusTitle.innerHTML = `<span>${data.message}</span>`;
+                                
+                                if (data.message.includes("generating") && !resultContainerCreated) {
+                                    const resultHtml = `
+                                    <div id="${resultContainerId}" class="mt-6 bg-white rounded-xl border border-gray-200 p-6 shadow-sm overflow-hidden">
+                                        <div class="flex justify-between items-end mb-4 border-b border-gray-100 pb-2">
+                                            <h3 class="text-base font-semibold text-gray-900">Repository report</h3>
+                                            <div class="flex gap-4">
+                                                <button onclick="switchTab(this, false)" class="tab-btn tab-active text-sm font-medium transition">Report</button>
+                                                <button onclick="switchTab(this, true)" id="${resultContainerId}-diagram-btn" class="tab-btn text-sm text-gray-500 font-medium transition hover:text-gray-800 hidden">Diagram</button>
+                                            </div>
+                                        </div>
+                                        <div id="${resultContainerId}-text" class="content-text w-full markdown-body text-sm break-words overflow-x-hidden">
+                                            <div class="w-full mt-2 space-y-3">
+                                                <div class="shimmer-line w-full"></div><div class="shimmer-line w-5/6"></div><div class="shimmer-line w-4/6"></div><div class="shimmer-line w-3/4"></div>
+                                            </div>
+                                        </div>
+                                        <div id="${resultContainerId}-diagram" class="content-diagram w-full hidden overflow-auto"></div>
+                                    </div>`;
+                                    
+                                    const loaderElement = document.getElementById(loaderId);
+                                    if (loaderElement) {
+                                        loaderElement.querySelector('.flex-1').insertAdjacentHTML('beforeend', resultHtml);
+                                    }
+                                    resultContainerCreated = true;
+                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                }
+                            }
+                            
+                            if (data.type === "file_list") {
+                                const fileListEl = document.getElementById(`${loaderId}-file-list`);
+                                if (fileListEl) {
+                                    data.files.forEach(f => {
+                                        fileListEl.insertAdjacentHTML('beforeend', `<li id="file-${btoa(f).replace(/=/g, '')}" class="flex items-center justify-between"><span class="flex items-center gap-3 truncate">${iconCircle} <span class="truncate">${f}</span></span> <span class="text-xs text-gray-400 font-sans ml-2 shrink-0">Queued</span></li>`);
+                                    });
+                                }
+                            }
+
+                            if (data.type === "file_update") {
+                                const safeId = `file-${btoa(data.file).replace(/=/g, '')}`;
+                                const el = document.getElementById(safeId);
+                                if (el) {
+                                    if (data.status === "reading") {
+                                        el.innerHTML = `<span class="flex items-center gap-2 text-gray-800 truncate">${iconSpin} <span class="ml-1 truncate">${data.file}</span></span> <span class="text-xs text-blue-500 font-sans font-medium ml-2 shrink-0">Reading now</span>`;
+                                    } else {
+                                        el.innerHTML = `<span class="flex items-center gap-3 truncate">${iconCheck} <span class="truncate">${data.file}</span></span> <span class="text-xs text-gray-500 font-sans ml-2 shrink-0">Analysed</span>`;
+                                    }
+                                }
+                            }
+                            
+                            if (data.type === "token") {
+                                if (!resultContainerCreated) {
+                                    const resultHtml = `<div id="${resultContainerId}" class="mt-6 bg-white rounded-xl border border-gray-200 p-6 shadow-sm overflow-hidden"><div class="flex justify-between items-end mb-4 border-b border-gray-100 pb-2"><h3 class="text-base font-semibold text-gray-900">Repository report</h3><div class="flex gap-4"><button onclick="switchTab(this, false)" class="tab-btn tab-active text-sm font-medium transition">Report</button><button onclick="switchTab(this, true)" id="${resultContainerId}-diagram-btn" class="tab-btn text-sm text-gray-500 font-medium transition hover:text-gray-800 hidden">Diagram</button></div></div><div id="${resultContainerId}-text" class="content-text w-full markdown-body text-sm break-words overflow-x-hidden"></div><div id="${resultContainerId}-diagram" class="content-diagram w-full hidden overflow-auto"></div></div>`;
+                                    const loaderElement = document.getElementById(loaderId);
+                                    if (loaderElement) {
+                                        loaderElement.querySelector('.flex-1').insertAdjacentHTML('beforeend', resultHtml);
+                                    }
+                                    resultContainerCreated = true;
+                                }
+
+                                if (!isStreamingText) {
+                                    isStreamingText = true;
+                                    const textContainer = document.getElementById(`${resultContainerId}-text`);
+                                    if (textContainer) textContainer.innerHTML = ''; 
+                                }
+                                aiTextBuffer += data.text;
+                                
+                                const cleanBuffer = aiTextBuffer
+                                    .replace(/```mermaid[\s\S]*?```/g, "*(Generating diagram...)*")
+                                    .replace(/^.*Visual Architecture Diagram.*$/gim, "");
+                                    
+                                // 🛡️ CRASH FIX HERE: Ensure element exists before writing
+                                const targetTextEl = document.getElementById(`${resultContainerId}-text`);
+                                if (targetTextEl) {
+                                    targetTextEl.innerHTML = marked.parse(cleanBuffer);
+                                }
+                            }
+
+                            if (data.type === "done") {
+                                const targetTextEl = document.getElementById(`${resultContainerId}-text`);
+                                if (targetTextEl) {
+                                    targetTextEl.innerHTML = marked.parse(data.clean_markdown);
+                                }
+                                
+                                const targetDiagramBtn = document.getElementById(`${resultContainerId}-diagram-btn`);
+                                const targetDiagram = document.getElementById(`${resultContainerId}-diagram`);
+                                
+                                if(data.mermaid_chart && !data.mermaid_chart.includes('generate nahi ho saka')) {
+                                    if(targetDiagramBtn) targetDiagramBtn.classList.remove('hidden');
+                                    if(targetDiagram) targetDiagram.innerHTML = data.mermaid_chart;
+                                }
+                                
+                                const statusTitle = document.getElementById(`${loaderId}-status-title`);
+                                if (statusTitle) statusTitle.innerText = "Analysis complete. Ask follow-up questions below.";
+                                
+                                // Save the updated HTML state back into the session memory safely
+                                sessions[fetchSessionId].hasContext = true;
+                                if (activeSessionId === fetchSessionId) {
+                                    sessions[fetchSessionId].html = chatContainer.innerHTML;
+                                }
+                            }
+                        }
+                        
+                        if (isNearBottom) chatContainer.scrollTop = chatContainer.scrollHeight;
+                    }
+                } else {
+                    const fetchSessionId = activeSessionId;
+                    const response = await fetch('http://127.0.0.1:8000/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: userInput, session_id: fetchSessionId }) });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Chat failed.');
+                    const replyHtml = `<div class="max-w-3xl mx-auto flex gap-4 mb-6">${aiAvatar}<div class="flex-1 min-w-0"><div class="text-gray-800 bg-white border border-gray-200 px-5 py-4 rounded-2xl shadow-sm markdown-body text-sm break-words overflow-x-hidden">${marked.parse(data.reply)}</div></div></div>`;
+                    
+                    if (activeSessionId === fetchSessionId) {
+                        chatContainer.insertAdjacentHTML('beforeend', replyHtml);
+                        chatContainer.scrollTop = chatContainer.scrollHeight;
+                        sessions[fetchSessionId].html = chatContainer.innerHTML;
+                    }
+                }
+            } catch (err) {
+                errorBox.innerText = `Error: ${err.message}`;
+                errorBox.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
